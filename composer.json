@@ -1,0 +1,26 @@
+{
+    "name": "centretek/settings-drupal",
+    "description": "Provides a factory for configuring settings.php with sane defaults for a variety of environments.",
+    "type": "library",
+    "require": {
+        "drupal/core": "^9",
+        "centretek/environment": "^1.0"
+    },
+    "authors": [
+        {
+            "name": "Patrick Wilson",
+            "email": "pwilson@centretek.com"
+        }
+    ],
+    "autoload": {
+        "psr-4": {
+            "Centretek\\Settings\\": "src/"
+        }
+    },
+    "repositories": [
+        {
+            "type": "vcs",
+            "url": "git@bitbucket.org:centretek/ctek-environment.git"
+        }
+    ]
+}
