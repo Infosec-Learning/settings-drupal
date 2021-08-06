@@ -64,7 +64,7 @@
         },
         {
             "name": "centretek/environment",
-            "version": "1.0",
+            "version": "1.0.0",
             "source": {
                 "type": "git",
                 "url": "git@bitbucket.org:centretek/ctek-environment.git",
