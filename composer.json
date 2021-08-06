@@ -20,7 +20,7 @@
     "repositories": [
         {
             "type": "vcs",
-            "url": "git@bitbucket.org:centretek/ctek-environment.git"
+            "url": "git@bitbucket.org:centretek/environment.git"
         }
     ]
 }

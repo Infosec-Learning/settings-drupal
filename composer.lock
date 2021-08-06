@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "524bfe7e0bad24ed5261a0c0a1ce69f5",
+    "content-hash": "0beee2bf170f824eba259db6394f546f",
     "packages": [
         {
             "name": "asm89/stack-cors",
@@ -67,7 +67,7 @@
             "version": "1.0.0",
             "source": {
                 "type": "git",
-                "url": "git@bitbucket.org:centretek/ctek-environment.git",
+                "url": "git@bitbucket.org:centretek/environment.git",
                 "reference": "201d34b31ba2a5b67b55b848254f87855d9d17a1"
             },
             "type": "library",
