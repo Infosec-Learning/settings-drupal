@@ -3,6 +3,7 @@
     "description": "Provides a factory for configuring settings.php with sane defaults for a variety of environments.",
     "type": "library",
     "require": {
+        "php": "^7.4 || ^8.0",
         "drupal/core": "^9",
         "centretek/environment": "^1.0"
     },
