@@ -42,7 +42,7 @@ class SettingsFactory {
     $this->settings['entity_update_batch_size'] = FALSE;
     $this
       ->addContainerYaml($this->appRoot . '/' . $this->sitePath . '/services.yml')
-      ->withConfigSync($this->appRoot . '../config')
+      ->withConfigSync($this->appRoot . '/../config')
       ->withFileScanIgnoreDirectories(
         'node_modules',
         'bower_components'
