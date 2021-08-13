@@ -47,7 +47,7 @@ class SettingsFactory {
         'node_modules',
         'bower_components'
       )
-      ->withPrivateFilePath($this->appRoot . '/files-private')
+      ->withPrivateFilePath($this->appRoot . '/../files-private')
       ->withTempFilePath('/tmp')
       ->withFast404()
     ;
