@@ -129,6 +129,22 @@ class SettingsFactory {
     return $this;
   }
 
+  public function withSolr(
+    $host,
+    $port,
+    $path,
+    $core,
+    $username = NULL,
+    $password = NULL
+  ) {
+    $_ENV['SOLR_HOST'] = $host;
+    $_ENV['SOLR_PORT'] = $port;
+    $_ENV['SOLR_PATH'] = $path;
+    $_ENV['SOLR_CORE'] = $core;
+    $_ENV['SOLR_USER'] = $username;
+    $_ENV['SOLR_PASSWORD'] = $password;
+  }
+
   public function withPrivateFilePath($path) {
     $this->settings['file_private_path'] = $path;
     return $this;
