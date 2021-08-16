@@ -143,6 +143,7 @@ class SettingsFactory {
     $_ENV['SOLR_CORE'] = $core;
     $_ENV['SOLR_USER'] = $username;
     $_ENV['SOLR_PASSWORD'] = $password;
+    return $this;
   }
 
   public function withPrivateFilePath($path) {
