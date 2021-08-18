@@ -71,8 +71,7 @@ class SettingsFactory {
         $this
           ->withPrivateFilePath('/mnt/files/' . $_ENV['AH_SITE_GROUP'] . '.' . $_ENV['AH_SITE_ENVIRONMENT'] . '/files-private')
           ->withTempFilePath('/mnt/gfs/' . $_ENV['AH_SITE_GROUP'] . '.' . $_ENV['AH_SITE_ENVIRONMENT'] . '/tmp')
-          ->includeSettings('/var/www/site-php/' . $_ENV['AH_SITE_GROUP'] . '/' . $_ENV['AH_SITE_GROUP'] . '-settings.inc')
-          ->includeSettings(dirname(__FILE__) . '/cloud-memcache-d8+.php');
+          ->includeSettings('/var/www/site-php/' . $_ENV['AH_SITE_GROUP'] . '/' . $_ENV['AH_SITE_GROUP'] . '-settings.inc');
         break;
       case Platform::PANTHEON:
 
