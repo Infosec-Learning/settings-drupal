@@ -71,7 +71,8 @@ class SettingsFactory {
         $this
           ->withPrivateFilePath('/mnt/files/' . $_ENV['AH_SITE_GROUP'] . '.' . $_ENV['AH_SITE_ENVIRONMENT'] . '/files-private')
           ->withTempFilePath('/mnt/gfs/' . $_ENV['AH_SITE_GROUP'] . '.' . $_ENV['AH_SITE_ENVIRONMENT'] . '/tmp')
-          ->includeSettings('/var/www/site-php/' . $_ENV['AH_SITE_GROUP'] . '/' . $_ENV['AH_SITE_GROUP'] . '-settings.inc');
+          ->includeSettings('/var/www/site-php/' . $_ENV['AH_SITE_GROUP'] . '/' . $_ENV['AH_SITE_GROUP'] . '-settings.inc')
+          ->withConfigSync($this->appRoot . '/../config');
         break;
       case Platform::PANTHEON:
 
