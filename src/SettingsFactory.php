@@ -40,6 +40,7 @@ class SettingsFactory {
     $this->settings['update_free_access'] = FALSE;
     $this->settings['rebuild_access'] = FALSE;
     $this->settings['entity_update_batch_size'] = FALSE;
+    $this->settings['skip_permissions_hardening'] = FALSE;
     $this
       ->addContainerYaml($this->appRoot . '/' . $this->sitePath . '/services.yml')
       ->withConfigSync($this->appRoot . '/../config')
@@ -58,7 +59,6 @@ class SettingsFactory {
         $this->config['system.performance']['css']['preprocess'] = FALSE;
         $this->config['system.performance']['js']['preprocess'] = FALSE;
         $this->settings['extension_discovery_scan_tests'] = TRUE;
-        $this->settings['skip_permissions_hardening'] = TRUE;
         $this->addContainerYaml($this->appRoot . '/sites/services.dev.yml');
         break;
       case Environment::STAGING:
