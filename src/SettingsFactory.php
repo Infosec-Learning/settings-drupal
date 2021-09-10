@@ -75,8 +75,85 @@ class SettingsFactory {
           ->withConfigSync($this->appRoot . '/../config');
         break;
       case Platform::PANTHEON:
+          $this
+              ->withPrivateFilePath('sites/default/files/private')
+              ->withTempFilePath(sys_get_temp_dir())
+              ->withConfigSync($this->appRoot . '/../config');
 
-        break;
+          /**
+           * Override the $databases variable to pass the correct Database credentials
+           * directly from Pantheon to Drupal.
+           *
+           * Issue: https://github.com/pantheon-systems/drops-8/issues/8
+           *
+           */
+          if (isset($_SERVER['PRESSFLOW_SETTINGS'])) {
+              $pressflow_settings = json_decode($_SERVER['PRESSFLOW_SETTINGS'], TRUE);
+              foreach ($pressflow_settings as $key => $value) {
+                  // One level of depth should be enough for $conf and $database.
+                  if ($key == 'conf') {
+                      foreach($value as $conf_key => $conf_value) {
+                          $this->config[$conf_key] = $conf_value;
+                      }
+                  }
+                  elseif ($key == 'databases') {
+                      // Protect default configuration but allow the specification of
+                      // additional databases. Also, allows fun things with 'prefix' if they
+                      // want to try multisite.
+                      if (!isset($this->databases) || !is_array($this->databases)) {
+                          $this->databases = array();
+                      }
+                      $this->databases = array_replace_recursive($this->databases, $value);
+                  }
+                  else {
+                      $$key = $value;
+                  }
+              }
+          }
+
+          /**
+           * Place Twig cache files in the Pantheon rolling temporary directory.
+           * A new rolling temporary directory is provided on every code deploy,
+           * guaranteeing that fresh twig cache files will be generated every time.
+           * Note that the rendered output generated from the twig cache files
+           * are also cached in the database, so a cache clear is still necessary
+           * to see updated results after a code deploy.
+           */
+          if (isset($_ENV['PANTHEON_ROLLING_TMP']) && isset($_ENV['PANTHEON_DEPLOYMENT_IDENTIFIER'])) {
+              // Relocate the compiled twig files to <binding-dir>/tmp/ROLLING/twig.
+              // The location of ROLLING will change with every deploy.
+              $this->settings['php_storage']['twig']['directory'] = $_ENV['PANTHEON_ROLLING_TMP'];
+              // Ensure that the compiled twig templates will be rebuilt whenever the
+              // deployment identifier changes.  Note that a cache rebuild is also necessary.
+              $this->settings['deployment_identifier'] = $_ENV['PANTHEON_DEPLOYMENT_IDENTIFIER'];
+              $this->settings['php_storage']['twig']['secret'] = $_ENV['DRUPAL_HASH_SALT'] . $this->settings['deployment_identifier'];
+          }
+
+          /**
+           * Install the Pantheon Service Provider to hook Pantheon services into
+           * Drupal 8. This service provider handles operations such as clearing the
+           * Pantheon edge cache whenever the Drupal cache is rebuilt.
+           */
+          $GLOBALS['conf']['container_service_providers']['PantheonServiceProvider'] = '\Pantheon\Internal\PantheonServiceProvider';
+
+          /**
+           * "Trusted host settings" are not necessary on Pantheon; traffic will only
+           * be routed to your site if the host settings match a domain configured for
+           * your site in the dashboard.
+           */
+          $this->settings['trusted_host_patterns'][] = '.*';
+
+          /**
+           * Load secrets file (workaround for ENV variables in pantheon)
+           */
+          $secrets_file = $_SERVER['HOME'] . '/files/private/secrets.json';
+          if (file_exists($secrets_file)) {
+              $pantheon_secrets = json_decode(file_get_contents($secrets_file), 1);
+              foreach ($pantheon_secrets as $pantheon_secret_key => $pantheon_secret_value) {
+                  $_ENV[$pantheon_secret_key] = $pantheon_secret_value;
+              }
+          }
+          break;
       case Platform::LANDO:
         $this
           ->withDatabase(...$this->getDatabaseFromLandoInfo())
@@ -144,6 +221,26 @@ class SettingsFactory {
     $_ENV['SOLR_USER'] = $username;
     $_ENV['SOLR_PASSWORD'] = $password;
     return $this;
+  }
+
+  public function withRedis($host, $port, $password) {
+      // Include the Redis services.yml file. Adjust the path if you installed to a contrib or other subdirectory.
+      $this->settings['container_yamls'][] = 'modules/contrib/redis/example.services.yml';
+
+      //phpredis is built into the Pantheon application container.
+      $this->settings['redis.connection']['interface'] = 'PhpRedis';
+      // These are dynamic variables handled by Pantheon.
+      $this->settings['redis.connection']['host'] = $host;
+      $this->settings['redis.connection']['port'] = $port;
+      $this->settings['redis.connection']['password'] = $password;
+
+      $this->settings['redis_compress_length'] = 100;
+      $this->settings['redis_compress_level'] = 1;
+
+      $this->settings['cache']['default'] = 'cache.backend.redis'; // Use Redis as the default cache.
+      $this->settings['cache_prefix']['default'] = 'drupal-redis';
+
+      $this->settings['cache']['bins']['form'] = 'cache.backend.database'; // Use the database for forms
   }
 
   public function withPrivateFilePath($path) {
