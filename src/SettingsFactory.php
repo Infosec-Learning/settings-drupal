@@ -105,9 +105,6 @@ class SettingsFactory {
                       }
                       $this->databases = array_replace_recursive($this->databases, $value);
                   }
-                  else {
-                      $$key = $value;
-                  }
               }
           }
 
