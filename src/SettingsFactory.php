@@ -14,6 +14,11 @@ class SettingsFactory {
   protected $config;
 
   /**
+   * @var \Platformsh\ConfigReader\Config $platformsh
+   */
+  protected $platformsh;
+
+  /**
    * @throws \Exception
    */
   public static function create($appRoot, $sitePath, &$settings, &$databases, &$config) {
@@ -29,6 +34,10 @@ class SettingsFactory {
     $this->settings = &$settings;
     $this->databases = &$databases;
     $this->config = &$config;
+
+    if (class_exists('\Platformsh\ConfigReader\Config')) {
+      $this->platformsh = new \Platformsh\ConfigReader\Config();
+    }
   }
 
   public function addContainerYaml($path) {
@@ -74,83 +83,150 @@ class SettingsFactory {
           ->includeSettings('/var/www/site-php/' . $_ENV['AH_SITE_GROUP'] . '/' . $_ENV['AH_SITE_GROUP'] . '-settings.inc')
           ->withConfigSync($this->appRoot . '/../config');
         break;
+      case Platform::PLATFORM_SH:
+        // Configure the database.
+        $this->withPlatformShDatabase('database', 'default');
+
+        // Enable verbose error messages on development branches, but not on the production branch.
+        // You may add more debug-centric settings here if desired to have them automatically enable
+        // on development but not production.
+        if (isset($this->platformsh->branch)) {
+          // Production type environment.
+          if ($this->platformsh->branch == 'master' || $this->platformsh->onDedicated()) {
+            $this->config['system.logging']['error_level'] = 'hide';
+          } // Development type environment.
+          else {
+            $this->config['system.logging']['error_level'] = 'verbose';
+          }
+        }
+
+        // Enable Redis caching.
+        if ($this->platformsh->hasRelationship('redis') && !\Drupal\Core\Installer\InstallerKernel::installationAttempted() && extension_loaded('redis')) {
+          $redis = $this->platformsh->credentials('redis');
+          $this->withRedis($redis['host'], $redis['port']);
+        }
+
+        if ($this->platformsh->inRuntime()) {
+          // Configure private and temporary file paths.
+          $this->settings['file_private_path'] = $this->platformsh->appDir . '/files-private';
+          $this->settings['file_temp_path'] = $this->platformsh->appDir . '/tmp';
+
+          // Configure the default PhpStorage and Twig template cache directories.
+          $this->settings['php_storage']['default']['directory'] = $this->settings['file_private_path'];
+          $this->settings['php_storage']['twig']['directory'] = $this->settings['file_private_path'];
+
+          // Set the deployment identifier, which is used by some Drupal cache systems.
+          $this->settings['deployment_identifier'] = $this->platformsh->treeId;
+        }
+
+        // The 'trusted_hosts_pattern' setting allows an admin to restrict the Host header values
+        // that are considered trusted.  If an attacker sends a request with a custom-crafted Host
+        // header then it can be an injection vector, depending on how the Host header is used.
+        // However, Platform.sh already replaces the Host header with the route that was used to reach
+        // Platform.sh, so it is guaranteed to be safe.  The following line explicitly allows all
+        // Host headers, as the only possible Host header is already guaranteed safe.
+        $this->settings['trusted_host_patterns'] = ['.*'];
+
+        // Import variables prefixed with 'd8settings:' into $settings
+        // and 'd8config:' into $config.
+        foreach ($this->platformsh->variables() as $name => $value) {
+          $parts = explode(':', $name);
+          list($prefix, $key) = array_pad($parts, 3, null);
+          switch ($prefix) {
+            case 'd8settings':
+            case 'drupal':
+              $this->settings[$key] = $value;
+              break;
+            case 'd8config':
+              if (count($parts) > 2) {
+                $temp = &$this->config[$key];
+                foreach (array_slice($parts, 2) as $n) {
+                  $prev = &$temp;
+                  $temp = &$temp[$n];
+                }
+                $prev[$n] = $value;
+              }
+              break;
+          }
+        }
+
+        break;
       case Platform::PANTHEON:
-          $this
-              ->withPrivateFilePath('sites/default/files/private')
-              ->withTempFilePath(sys_get_temp_dir())
-              ->withConfigSync($this->appRoot . '/../config');
+        $this
+          ->withPrivateFilePath('sites/default/files/private')
+          ->withTempFilePath(sys_get_temp_dir())
+          ->withConfigSync($this->appRoot . '/../config');
 
-          /**
-           * Override the $databases variable to pass the correct Database credentials
-           * directly from Pantheon to Drupal.
-           *
-           * Issue: https://github.com/pantheon-systems/drops-8/issues/8
-           *
-           */
-          if (isset($_SERVER['PRESSFLOW_SETTINGS'])) {
-              $pressflow_settings = json_decode($_SERVER['PRESSFLOW_SETTINGS'], TRUE);
-              foreach ($pressflow_settings as $key => $value) {
-                  // One level of depth should be enough for $conf and $database.
-                  if ($key == 'conf') {
-                      foreach($value as $conf_key => $conf_value) {
-                          $this->config[$conf_key] = $conf_value;
-                      }
-                  }
-                  elseif ($key == 'databases') {
-                      // Protect default configuration but allow the specification of
-                      // additional databases. Also, allows fun things with 'prefix' if they
-                      // want to try multisite.
-                      if (!isset($this->databases) || !is_array($this->databases)) {
-                          $this->databases = array();
-                      }
-                      $this->databases = array_replace_recursive($this->databases, $value);
-                  }
+        /**
+         * Override the $databases variable to pass the correct Database credentials
+         * directly from Pantheon to Drupal.
+         *
+         * Issue: https://github.com/pantheon-systems/drops-8/issues/8
+         *
+         */
+        if (isset($_SERVER['PRESSFLOW_SETTINGS'])) {
+          $pressflow_settings = json_decode($_SERVER['PRESSFLOW_SETTINGS'], TRUE);
+          foreach ($pressflow_settings as $key => $value) {
+            // One level of depth should be enough for $conf and $database.
+            if ($key == 'conf') {
+              foreach ($value as $conf_key => $conf_value) {
+                $this->config[$conf_key] = $conf_value;
               }
-          }
-
-          /**
-           * Place Twig cache files in the Pantheon rolling temporary directory.
-           * A new rolling temporary directory is provided on every code deploy,
-           * guaranteeing that fresh twig cache files will be generated every time.
-           * Note that the rendered output generated from the twig cache files
-           * are also cached in the database, so a cache clear is still necessary
-           * to see updated results after a code deploy.
-           */
-          if (isset($_ENV['PANTHEON_ROLLING_TMP']) && isset($_ENV['PANTHEON_DEPLOYMENT_IDENTIFIER'])) {
-              // Relocate the compiled twig files to <binding-dir>/tmp/ROLLING/twig.
-              // The location of ROLLING will change with every deploy.
-              $this->settings['php_storage']['twig']['directory'] = $_ENV['PANTHEON_ROLLING_TMP'];
-              // Ensure that the compiled twig templates will be rebuilt whenever the
-              // deployment identifier changes.  Note that a cache rebuild is also necessary.
-              $this->settings['deployment_identifier'] = $_ENV['PANTHEON_DEPLOYMENT_IDENTIFIER'];
-              $this->settings['php_storage']['twig']['secret'] = $_ENV['DRUPAL_HASH_SALT'] . $this->settings['deployment_identifier'];
-          }
-
-          /**
-           * Install the Pantheon Service Provider to hook Pantheon services into
-           * Drupal 8. This service provider handles operations such as clearing the
-           * Pantheon edge cache whenever the Drupal cache is rebuilt.
-           */
-          $GLOBALS['conf']['container_service_providers']['PantheonServiceProvider'] = '\Pantheon\Internal\PantheonServiceProvider';
-
-          /**
-           * "Trusted host settings" are not necessary on Pantheon; traffic will only
-           * be routed to your site if the host settings match a domain configured for
-           * your site in the dashboard.
-           */
-          $this->settings['trusted_host_patterns'][] = '.*';
-
-          /**
-           * Load secrets file (workaround for ENV variables in pantheon)
-           */
-          $secrets_file = $_SERVER['HOME'] . '/files/private/secrets.json';
-          if (file_exists($secrets_file)) {
-              $pantheon_secrets = json_decode(file_get_contents($secrets_file), 1);
-              foreach ($pantheon_secrets as $pantheon_secret_key => $pantheon_secret_value) {
-                  $_ENV[$pantheon_secret_key] = $pantheon_secret_value;
+            } elseif ($key == 'databases') {
+              // Protect default configuration but allow the specification of
+              // additional databases. Also, allows fun things with 'prefix' if they
+              // want to try multisite.
+              if (!isset($this->databases) || !is_array($this->databases)) {
+                $this->databases = array();
               }
+              $this->databases = array_replace_recursive($this->databases, $value);
+            }
           }
-          break;
+        }
+
+        /**
+         * Place Twig cache files in the Pantheon rolling temporary directory.
+         * A new rolling temporary directory is provided on every code deploy,
+         * guaranteeing that fresh twig cache files will be generated every time.
+         * Note that the rendered output generated from the twig cache files
+         * are also cached in the database, so a cache clear is still necessary
+         * to see updated results after a code deploy.
+         */
+        if (isset($_ENV['PANTHEON_ROLLING_TMP']) && isset($_ENV['PANTHEON_DEPLOYMENT_IDENTIFIER'])) {
+          // Relocate the compiled twig files to <binding-dir>/tmp/ROLLING/twig.
+          // The location of ROLLING will change with every deploy.
+          $this->settings['php_storage']['twig']['directory'] = $_ENV['PANTHEON_ROLLING_TMP'];
+          // Ensure that the compiled twig templates will be rebuilt whenever the
+          // deployment identifier changes.  Note that a cache rebuild is also necessary.
+          $this->settings['deployment_identifier'] = $_ENV['PANTHEON_DEPLOYMENT_IDENTIFIER'];
+          $this->settings['php_storage']['twig']['secret'] = $_ENV['DRUPAL_HASH_SALT'] . $this->settings['deployment_identifier'];
+        }
+
+        /**
+         * Install the Pantheon Service Provider to hook Pantheon services into
+         * Drupal 8. This service provider handles operations such as clearing the
+         * Pantheon edge cache whenever the Drupal cache is rebuilt.
+         */
+        $GLOBALS['conf']['container_service_providers']['PantheonServiceProvider'] = '\Pantheon\Internal\PantheonServiceProvider';
+
+        /**
+         * "Trusted host settings" are not necessary on Pantheon; traffic will only
+         * be routed to your site if the host settings match a domain configured for
+         * your site in the dashboard.
+         */
+        $this->settings['trusted_host_patterns'][] = '.*';
+
+        /**
+         * Load secrets file (workaround for ENV variables in pantheon)
+         */
+        $secrets_file = $_SERVER['HOME'] . '/files/private/secrets.json';
+        if (file_exists($secrets_file)) {
+          $pantheon_secrets = json_decode(file_get_contents($secrets_file), 1);
+          foreach ($pantheon_secrets as $pantheon_secret_key => $pantheon_secret_value) {
+            $_ENV[$pantheon_secret_key] = $pantheon_secret_value;
+          }
+        }
+        break;
       case Platform::LANDO:
         $this
           ->withDatabase(...$this->getDatabaseFromLandoInfo())
@@ -171,12 +247,22 @@ class SettingsFactory {
   protected function getDatabaseFromLandoInfo() {
     $landoInfo = json_decode(getenv('LANDO_INFO'));
     $database = $landoInfo->database;
+    $creds = $database->creds;
+    // Platform.sh likes to pass creds as an array
+    if (is_array($creds)) {
+      // Use first set of credentials to connect to database
+      $creds = reset($creds);
+    }
+    // Platform.sh uses path instead of database
+    if (!isset($creds->database) && isset($creds->path)) {
+      $creds->database = $creds->path;
+    }
     return [
       $database->internal_connection->host,
       $database->internal_connection->port,
-      $database->creds->database,
-      $database->creds->user,
-      $database->creds->password,
+      $creds->database,
+      $creds->user,
+      $creds->password,
     ];
   }
 
@@ -203,6 +289,31 @@ class SettingsFactory {
     return $this;
   }
 
+  /**
+   * @param string $relationship
+   * @param string $db_identifier
+   * @return SettingsFactory
+   */
+  public function withPlatformShDatabase(
+    $relationship,
+    $db_identifier = 'default'
+  ) {
+    // Configure the database.
+    if ($this->platformsh->hasRelationship($relationship)) {
+      $creds = $this->platformsh->credentials($relationship);
+      $this->databases[$db_identifier]['default'] = [
+        'driver' => $creds['scheme'],
+        'database' => $creds['path'],
+        'username' => $creds['username'],
+        'password' => $creds['password'],
+        'host' => $creds['host'],
+        'port' => $creds['port'],
+        'pdo' => [\PDO::MYSQL_ATTR_COMPRESS => !empty($creds['query']['compression'])]
+      ];
+    }
+    return $this;
+  }
+
   public function withSolr(
     $host,
     $port,
@@ -220,24 +331,27 @@ class SettingsFactory {
     return $this;
   }
 
-  public function withRedis($host, $port, $password) {
-      // Include the Redis services.yml file. Adjust the path if you installed to a contrib or other subdirectory.
-      $this->settings['container_yamls'][] = 'modules/contrib/redis/example.services.yml';
+  public function withRedis($host, $port, $password = '') {
+    // Include the Redis services.yml file. Adjust the path if you installed to a contrib or other subdirectory.
+    $this->settings['container_yamls'][] = 'modules/contrib/redis/example.services.yml';
 
-      //phpredis is built into the Pantheon application container.
-      $this->settings['redis.connection']['interface'] = 'PhpRedis';
-      // These are dynamic variables handled by Pantheon.
-      $this->settings['redis.connection']['host'] = $host;
-      $this->settings['redis.connection']['port'] = $port;
+    //phpredis is built into the Pantheon application container.
+    $this->settings['redis.connection']['interface'] = 'PhpRedis';
+    // These are dynamic variables handled by Pantheon.
+    $this->settings['redis.connection']['host'] = $host;
+    $this->settings['redis.connection']['port'] = $port;
+    if (!empty($password)) {
       $this->settings['redis.connection']['password'] = $password;
+    }
 
-      $this->settings['redis_compress_length'] = 100;
-      $this->settings['redis_compress_level'] = 1;
+    $this->settings['redis_compress_length'] = 100;
+    $this->settings['redis_compress_level'] = 1;
 
-      $this->settings['cache']['default'] = 'cache.backend.redis'; // Use Redis as the default cache.
-      $this->settings['cache_prefix']['default'] = 'drupal-redis';
+    $this->settings['cache']['default'] = 'cache.backend.redis'; // Use Redis as the default cache.
+    $this->settings['cache_prefix']['default'] = 'drupal-redis';
 
-      $this->settings['cache']['bins']['form'] = 'cache.backend.database'; // Use the database for forms
+    $this->settings['cache']['bins']['form'] = 'cache.backend.database'; // Use the database for forms
+    return $this;
   }
 
   public function withPrivateFilePath($path) {
