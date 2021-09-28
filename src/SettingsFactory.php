@@ -13,6 +13,8 @@ class SettingsFactory {
   protected $databases;
   protected $config;
 
+  protected $landoInfo;
+
   /**
    * @throws \Exception
    */
@@ -29,6 +31,9 @@ class SettingsFactory {
     $this->settings = &$settings;
     $this->databases = &$databases;
     $this->config = &$config;
+    if (Platform::getPlatform() === Platform::LANDO) {
+      $this->landoInfo = json_decode(getenv('LANDO_INFO'));
+    }
   }
 
   public function addContainerYaml($path) {
@@ -152,10 +157,11 @@ class SettingsFactory {
           }
           break;
       case Platform::LANDO:
-        $this
-          ->withDatabase(...$this->getDatabaseFromLandoInfo())
-          ->withLocalSettings()
-        ;
+        $this->withDatabase(...$this->getDatabaseFromLandoInfo());
+        if (isset($this->landoInfo->index)) {
+          $this->withSolr(...$this->getSolrFromLandoInfo());
+        }
+        $this->withLocalSettings();
         break;
     }
     return $this;
@@ -169,14 +175,25 @@ class SettingsFactory {
   }
 
   protected function getDatabaseFromLandoInfo() {
-    $landoInfo = json_decode(getenv('LANDO_INFO'));
-    $database = $landoInfo->database;
+    $database = $this->landoInfo->database;
     return [
       $database->internal_connection->host,
       $database->internal_connection->port,
       $database->creds->database,
       $database->creds->user,
       $database->creds->password,
+    ];
+  }
+
+  protected function getSolrFromLandoInfo() {
+    $solr = $this->landoInfo->index;
+    return [
+      $solr->internal_connection->host,
+      $solr->internal_connection->port,
+      '/solr',
+      NULL,
+      NULL,
+      NULL,
     ];
   }
 
