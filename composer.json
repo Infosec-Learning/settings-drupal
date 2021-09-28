@@ -4,7 +4,7 @@
     "type": "library",
     "require": {
         "php": "^7.4 || ^8.0",
-        "drupal/core": "^9",
+        "drupal/core": "^9 || ^8",
         "centretek/environment": "^1.0"
     },
     "authors": [
