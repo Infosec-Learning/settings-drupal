@@ -19,7 +19,7 @@ class SettingsFactory {
    * @throws \Exception
    */
   public static function create($appRoot, $sitePath, &$settings, &$databases, &$config) {
-    if (stripos(ini_get('variables_order'), 'E') === FALSE) {
+    if (Platform::getPlatform() !== Platform::PANTHEON && stripos(ini_get('variables_order'), 'E') === FALSE) {
       throw new \Exception('Environment variables global variable has not been populated. variables_order should include "E" in php.ini.');
     }
     return new static($appRoot, $sitePath, $settings, $databases, $config);
