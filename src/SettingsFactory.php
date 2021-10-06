@@ -13,6 +13,8 @@ class SettingsFactory {
   protected $databases;
   protected $config;
 
+  protected $landoInfo;
+
   /**
    * @var \Platformsh\ConfigReader\Config $platformsh
    */
@@ -22,7 +24,7 @@ class SettingsFactory {
    * @throws \Exception
    */
   public static function create($appRoot, $sitePath, &$settings, &$databases, &$config) {
-    if (stripos(ini_get('variables_order'), 'E') === FALSE) {
+    if (Platform::getPlatform() !== Platform::PANTHEON && stripos(ini_get('variables_order'), 'E') === FALSE) {
       throw new \Exception('Environment variables global variable has not been populated. variables_order should include "E" in php.ini.');
     }
     return new static($appRoot, $sitePath, $settings, $databases, $config);
@@ -37,6 +39,10 @@ class SettingsFactory {
 
     if (class_exists('\Platformsh\ConfigReader\Config')) {
       $this->platformsh = new \Platformsh\ConfigReader\Config();
+    }
+
+    if (Platform::getPlatform() === Platform::LANDO) {
+      $this->landoInfo = json_decode(getenv('LANDO_INFO'));
     }
   }
 
@@ -110,6 +116,7 @@ class SettingsFactory {
           // Configure private and temporary file paths.
           $this->settings['file_private_path'] = $this->platformsh->appDir . '/files-private';
           $this->settings['file_temp_path'] = $this->platformsh->appDir . '/tmp';
+          $this->withConfigSync($this->platformsh->appDir . '/config');
 
           // Configure the default PhpStorage and Twig template cache directories.
           $this->settings['php_storage']['default']['directory'] = $this->settings['file_private_path'];
@@ -169,10 +176,11 @@ class SettingsFactory {
           foreach ($pressflow_settings as $key => $value) {
             // One level of depth should be enough for $conf and $database.
             if ($key == 'conf') {
-              foreach ($value as $conf_key => $conf_value) {
+              foreach($value as $conf_key => $conf_value) {
                 $this->config[$conf_key] = $conf_value;
               }
-            } elseif ($key == 'databases') {
+            }
+            elseif ($key == 'databases') {
               // Protect default configuration but allow the specification of
               // additional databases. Also, allows fun things with 'prefix' if they
               // want to try multisite.
@@ -215,23 +223,14 @@ class SettingsFactory {
          * your site in the dashboard.
          */
         $this->settings['trusted_host_patterns'][] = '.*';
-
-        /**
-         * Load secrets file (workaround for ENV variables in pantheon)
-         */
-        $secrets_file = $_SERVER['HOME'] . '/files/private/secrets.json';
-        if (file_exists($secrets_file)) {
-          $pantheon_secrets = json_decode(file_get_contents($secrets_file), 1);
-          foreach ($pantheon_secrets as $pantheon_secret_key => $pantheon_secret_value) {
-            $_ENV[$pantheon_secret_key] = $pantheon_secret_value;
-          }
-        }
+        $this->withPantheonSecrets();
         break;
       case Platform::LANDO:
-        $this
-          ->withDatabase(...$this->getDatabaseFromLandoInfo())
-          ->withLocalSettings()
-        ;
+        $this->withDatabase(...$this->getDatabaseFromLandoInfo());
+        if (isset($this->landoInfo->index)) {
+          $this->withSolr(...$this->getSolrFromLandoInfo());
+        }
+        $this->withLocalSettings();
         break;
     }
     return $this;
@@ -245,8 +244,7 @@ class SettingsFactory {
   }
 
   protected function getDatabaseFromLandoInfo() {
-    $landoInfo = json_decode(getenv('LANDO_INFO'));
-    $database = $landoInfo->database;
+    $database = $this->landoInfo->database;
     $creds = $database->creds;
     // Platform.sh likes to pass creds as an array
     if (is_array($creds)) {
@@ -264,6 +262,34 @@ class SettingsFactory {
       $creds->user,
       $creds->password,
     ];
+  }
+
+  protected function getSolrFromLandoInfo() {
+    $solr = $this->landoInfo->index;
+    return [
+      $solr->internal_connection->host,
+      $solr->internal_connection->port,
+      '/solr',
+      NULL,
+      NULL,
+      NULL,
+    ];
+  }
+
+  public function withPantheonSecrets($secrets_file = NULL) {
+    /**
+     * Load secrets file (workaround for ENV variables in pantheon)
+     */
+    if (!$secrets_file) {
+      $secrets_file = $_SERVER['HOME'] . '/files/private/secrets.json';
+    }
+    if (file_exists($secrets_file)) {
+      $pantheon_secrets = json_decode(file_get_contents($secrets_file), 1);
+      foreach ($pantheon_secrets as $pantheon_secret_key => $pantheon_secret_value) {
+        $_ENV[$pantheon_secret_key] = $pantheon_secret_value;
+      }
+    }
+    return $this;
   }
 
   public function withDatabase(
