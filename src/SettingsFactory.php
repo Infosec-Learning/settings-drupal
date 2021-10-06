@@ -116,7 +116,7 @@ class SettingsFactory {
           // Configure private and temporary file paths.
           $this->settings['file_private_path'] = $this->platformsh->appDir . '/files-private';
           $this->settings['file_temp_path'] = $this->platformsh->appDir . '/tmp';
-          $this->withConfigSync($this->platformsh->appDir . '/config');
+          $this->withConfigSync($this->platformsh->appDir . '/config/' . $this->sitePath);
 
           // Configure the default PhpStorage and Twig template cache directories.
           $this->settings['php_storage']['default']['directory'] = $this->settings['file_private_path'];
