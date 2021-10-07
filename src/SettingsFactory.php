@@ -9,6 +9,7 @@ class SettingsFactory {
 
   protected $appRoot;
   protected $sitePath;
+  protected $siteName;
   protected $settings;
   protected $databases;
   protected $config;
@@ -36,6 +37,8 @@ class SettingsFactory {
     $this->settings = &$settings;
     $this->databases = &$databases;
     $this->config = &$config;
+
+    [,$this->siteName] = explode('/', $sitePath);
 
     if (class_exists('\Platformsh\ConfigReader\Config')) {
       $this->platformsh = new \Platformsh\ConfigReader\Config();
@@ -116,7 +119,7 @@ class SettingsFactory {
           // Configure private and temporary file paths.
           $this->settings['file_private_path'] = $this->platformsh->appDir . '/files-private';
           $this->settings['file_temp_path'] = $this->platformsh->appDir . '/tmp';
-          $this->withConfigSync($this->platformsh->appDir . '/config/' . $this->sitePath);
+          $this->withConfigSync($this->platformsh->appDir . '/config/' . $this->siteName);
 
           // Configure the default PhpStorage and Twig template cache directories.
           $this->settings['php_storage']['default']['directory'] = $this->settings['file_private_path'];
