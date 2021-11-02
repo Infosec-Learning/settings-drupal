@@ -180,8 +180,8 @@ class SettingsFactory {
     return [
       $solr->internal_connection->host,
       $solr->internal_connection->port,
-      '/solr',
-      NULL,
+      '/',
+      $solr->core,
       NULL,
       NULL,
     ];
