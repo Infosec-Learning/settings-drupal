@@ -59,6 +59,8 @@ class SettingsFactory {
     ;
     switch (Environment::getEnvironment()) {
       case Environment::LOCAL:
+        $this->withLocalSettings();
+        // Intentionally do not break here, need everything from DEV too
       case Environment::DEV:
         $this->config['system.logging']['error_level'] = 'verbose';
         $this->config['system.performance']['css']['preprocess'] = FALSE;
