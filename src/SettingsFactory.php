@@ -9,11 +9,17 @@ class SettingsFactory {
 
   protected $appRoot;
   protected $sitePath;
+  protected $siteName;
   protected $settings;
   protected $databases;
   protected $config;
 
   protected $landoInfo;
+
+  /**
+   * @var \Platformsh\ConfigReader\Config $platformsh
+   */
+  protected $platformsh;
 
   /**
    * @throws \Exception
@@ -31,6 +37,13 @@ class SettingsFactory {
     $this->settings = &$settings;
     $this->databases = &$databases;
     $this->config = &$config;
+
+    [,$this->siteName] = explode('/', $sitePath);
+
+    if (class_exists('\Platformsh\ConfigReader\Config')) {
+      $this->platformsh = new \Platformsh\ConfigReader\Config();
+    }
+
     if (Platform::getPlatform() === Platform::LANDO) {
       $this->landoInfo = json_decode(getenv('LANDO_INFO'));
     }
@@ -80,6 +93,75 @@ class SettingsFactory {
           ->withTempFilePath('/mnt/gfs/' . $_ENV['AH_SITE_GROUP'] . '.' . $_ENV['AH_SITE_ENVIRONMENT'] . '/tmp')
           ->includeSettings('/var/www/site-php/' . $_ENV['AH_SITE_GROUP'] . '/' . $_ENV['AH_SITE_GROUP'] . '-settings.inc')
           ->withConfigSync($this->appRoot . '/../config');
+        break;
+      case Platform::PLATFORM_SH:
+        // Configure the database.
+        $this->withPlatformShDatabase('database', 'default');
+
+        // Enable verbose error messages on development branches, but not on the production branch.
+        // You may add more debug-centric settings here if desired to have them automatically enable
+        // on development but not production.
+        if (isset($this->platformsh->branch)) {
+          // Production type environment.
+          if ($this->platformsh->branch == 'master' || $this->platformsh->onDedicated()) {
+            $this->config['system.logging']['error_level'] = 'hide';
+          } // Development type environment.
+          else {
+            $this->config['system.logging']['error_level'] = 'verbose';
+          }
+        }
+
+        // Enable Redis caching.
+        if ($this->platformsh->hasRelationship('redis') && !\Drupal\Core\Installer\InstallerKernel::installationAttempted() && extension_loaded('redis')) {
+          $redis = $this->platformsh->credentials('redis');
+          $this->withRedis($redis['host'], $redis['port']);
+        }
+
+        if ($this->platformsh->inRuntime()) {
+          // Configure private and temporary file paths.
+          $this->settings['file_private_path'] = $this->platformsh->appDir . '/files-private';
+          $this->settings['file_temp_path'] = $this->platformsh->appDir . '/tmp';
+          $this->withConfigSync($this->platformsh->appDir . '/config/' . $this->siteName);
+
+          // Configure the default PhpStorage and Twig template cache directories.
+          $this->settings['php_storage']['default']['directory'] = $this->settings['file_private_path'];
+          $this->settings['php_storage']['twig']['directory'] = $this->settings['file_private_path'];
+
+          // Set the deployment identifier, which is used by some Drupal cache systems.
+          $this->settings['deployment_identifier'] = $this->platformsh->treeId;
+        }
+
+        // The 'trusted_hosts_pattern' setting allows an admin to restrict the Host header values
+        // that are considered trusted.  If an attacker sends a request with a custom-crafted Host
+        // header then it can be an injection vector, depending on how the Host header is used.
+        // However, Platform.sh already replaces the Host header with the route that was used to reach
+        // Platform.sh, so it is guaranteed to be safe.  The following line explicitly allows all
+        // Host headers, as the only possible Host header is already guaranteed safe.
+        $this->settings['trusted_host_patterns'] = ['.*'];
+
+        // Import variables prefixed with 'd8settings:' into $settings
+        // and 'd8config:' into $config.
+        foreach ($this->platformsh->variables() as $name => $value) {
+          $parts = explode(':', $name);
+          list($prefix, $key) = array_pad($parts, 3, null);
+          switch ($prefix) {
+            case 'd8settings':
+            case 'drupal':
+              $this->settings[$key] = $value;
+              break;
+            case 'd8config':
+              if (count($parts) > 2) {
+                $temp = &$this->config[$key];
+                foreach (array_slice($parts, 2) as $n) {
+                  $prev = &$temp;
+                  $temp = &$temp[$n];
+                }
+                $prev[$n] = $value;
+              }
+              break;
+          }
+        }
+
         break;
       case Platform::PANTHEON:
         $this
@@ -168,12 +250,22 @@ class SettingsFactory {
 
   protected function getDatabaseFromLandoInfo() {
     $database = $this->landoInfo->database;
+    $creds = $database->creds;
+    // Platform.sh likes to pass creds as an array
+    if (is_array($creds)) {
+      // Use first set of credentials to connect to database
+      $creds = reset($creds);
+    }
+    // Platform.sh uses path instead of database
+    if (!isset($creds->database) && isset($creds->path)) {
+      $creds->database = $creds->path;
+    }
     return [
       $database->internal_connection->host,
       $database->internal_connection->port,
-      $database->creds->database,
-      $database->creds->user,
-      $database->creds->password,
+      $creds->database,
+      $creds->user,
+      $creds->password,
     ];
   }
 
@@ -228,6 +320,31 @@ class SettingsFactory {
     return $this;
   }
 
+  /**
+   * @param string $relationship
+   * @param string $db_identifier
+   * @return SettingsFactory
+   */
+  public function withPlatformShDatabase(
+    $relationship,
+    $db_identifier = 'default'
+  ) {
+    // Configure the database.
+    if ($this->platformsh->hasRelationship($relationship)) {
+      $creds = $this->platformsh->credentials($relationship);
+      $this->databases[$db_identifier]['default'] = [
+        'driver' => $creds['scheme'],
+        'database' => $creds['path'],
+        'username' => $creds['username'],
+        'password' => $creds['password'],
+        'host' => $creds['host'],
+        'port' => $creds['port'],
+        'pdo' => [\PDO::MYSQL_ATTR_COMPRESS => !empty($creds['query']['compression'])]
+      ];
+    }
+    return $this;
+  }
+
   public function withSolr(
     $host,
     $port,
@@ -245,7 +362,7 @@ class SettingsFactory {
     return $this;
   }
 
-  public function withRedis($host, $port, $password) {
+  public function withRedis($host, $port, $password = '') {
     // Include the Redis services.yml file. Adjust the path if you installed to a contrib or other subdirectory.
     $this->settings['container_yamls'][] = 'modules/contrib/redis/example.services.yml';
 
@@ -254,7 +371,9 @@ class SettingsFactory {
     // These are dynamic variables handled by Pantheon.
     $this->settings['redis.connection']['host'] = $host;
     $this->settings['redis.connection']['port'] = $port;
-    $this->settings['redis.connection']['password'] = $password;
+    if (!empty($password)) {
+      $this->settings['redis.connection']['password'] = $password;
+    }
 
     $this->settings['redis_compress_length'] = 100;
     $this->settings['redis_compress_level'] = 1;
@@ -263,6 +382,7 @@ class SettingsFactory {
     $this->settings['cache_prefix']['default'] = 'drupal-redis';
 
     $this->settings['cache']['bins']['form'] = 'cache.backend.database'; // Use the database for forms
+    return $this;
   }
 
   public function withPrivateFilePath($path) {
