@@ -103,7 +103,7 @@ class SettingsFactory {
         // on development but not production.
         if (isset($this->platformsh->branch)) {
           // Production type environment.
-          if ($this->platformsh->branch == 'master' || $this->platformsh->onDedicated()) {
+          if ($this->platformsh->branch == 'master' || $this->platformsh->branch == 'main' || $this->platformsh->onDedicated()) {
             $this->config['system.logging']['error_level'] = 'hide';
           } // Development type environment.
           else {
